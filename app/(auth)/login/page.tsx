@@ -15,6 +15,7 @@ function LoginForm() {
   const [email, setEmail] = useState("alice@agileboard.dev");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [demoLoading, setDemoLoading] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -31,6 +32,24 @@ function LoginForm() {
       return;
     }
     toast.success("Welcome back!");
+    router.push(params.get("callbackUrl") ?? "/projects");
+    router.refresh();
+  }
+
+  async function handleDemoLogin() {
+    setDemoLoading(true);
+    const res = await signIn("credentials", {
+      email: "alice@agileboard.dev",
+      password: "password123",
+      redirect: false,
+    });
+    setDemoLoading(false);
+
+    if (res?.error) {
+      toast.error("Demo sign-in failed. Please try again.");
+      return;
+    }
+    toast.success("Welcome to the demo!");
     router.push(params.get("callbackUrl") ?? "/projects");
     router.refresh();
   }
@@ -79,14 +98,29 @@ function LoginForm() {
         Continue with Google
       </Button>
 
+      <div className="my-4 flex items-center gap-3">
+        <div className="h-px flex-1 bg-slate-200" />
+        <span className="text-xs text-slate-400">or</span>
+        <div className="h-px flex-1 bg-slate-200" />
+      </div>
+
+      <Button
+        variant="secondary"
+        className="w-full"
+        onClick={handleDemoLogin}
+        loading={demoLoading}
+      >
+        Try Demo — No account needed
+      </Button>
+      <p className="mt-2 text-center text-xs text-slate-400">
+        Demo data is shared and resets periodically
+      </p>
+
       <p className="mt-5 text-center text-sm text-slate-500">
         No account?{" "}
         <Link href="/register" className="font-medium text-indigo-600 hover:underline">
           Create one
         </Link>
-      </p>
-      <p className="mt-3 text-center text-xs text-slate-400">
-        Demo: any seeded user email · password: password123
       </p>
     </Card>
   );

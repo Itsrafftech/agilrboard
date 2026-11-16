@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { router, projectProcedure } from "@/server/trpc";
+import { router, projectProcedure, writerProcedure } from "@/server/trpc";
 import { getSprintOrThrow, scopedWrite } from "@/server/lib/guards";
 
 export const sprintRouter = router({
@@ -31,7 +31,7 @@ export const sprintRouter = router({
       });
     }),
 
-  create: projectProcedure
+  create: writerProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -56,7 +56,7 @@ export const sprintRouter = router({
       });
     }),
 
-  start: projectProcedure
+  start: writerProcedure
     .input(z.object({ projectId: z.string(), sprintId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       await getSprintOrThrow(ctx.prisma, input.projectId, input.sprintId);
@@ -78,7 +78,7 @@ export const sprintRouter = router({
       );
     }),
 
-  complete: projectProcedure
+  complete: writerProcedure
     .input(z.object({ projectId: z.string(), sprintId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       await getSprintOrThrow(ctx.prisma, input.projectId, input.sprintId);
@@ -91,7 +91,7 @@ export const sprintRouter = router({
       );
     }),
 
-  update: projectProcedure
+  update: writerProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -111,7 +111,7 @@ export const sprintRouter = router({
       );
     }),
 
-  delete: projectProcedure
+  delete: writerProcedure
     .input(z.object({ projectId: z.string(), sprintId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       await getSprintOrThrow(ctx.prisma, input.projectId, input.sprintId);

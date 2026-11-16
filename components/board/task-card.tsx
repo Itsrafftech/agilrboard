@@ -11,13 +11,16 @@ import type { TaskWithRelations } from "@/types";
 export function TaskCard({
   task,
   onClick,
+  readOnly = false,
 }: {
   task: TaskWithRelations;
   onClick: () => void;
+  readOnly?: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.id,
     data: { task },
+    disabled: readOnly,
   });
 
   const style = {
@@ -36,7 +39,8 @@ export function TaskCard({
       {...listeners}
       onClick={onClick}
       className={cn(
-        "cursor-grab rounded-lg border border-slate-200 bg-white p-3 shadow-sm transition-shadow hover:shadow-md active:cursor-grabbing",
+        "rounded-lg border border-slate-200 bg-white p-3 shadow-sm transition-shadow hover:shadow-md",
+        readOnly ? "cursor-pointer" : "cursor-grab active:cursor-grabbing",
         isDragging && "opacity-40"
       )}
     >

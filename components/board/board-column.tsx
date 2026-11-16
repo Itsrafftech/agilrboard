@@ -13,12 +13,14 @@ export function BoardColumn({
   tasks,
   onAddTask,
   onTaskClick,
+  canWrite,
 }: {
   id: string;
   title: string;
   tasks: TaskWithRelations[];
   onAddTask: () => void;
   onTaskClick: (task: TaskWithRelations) => void;
+  canWrite: boolean;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id });
 
@@ -31,13 +33,15 @@ export function BoardColumn({
             {tasks.length}
           </span>
         </h3>
-        <button
-          onClick={onAddTask}
-          className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-          aria-label={`Add task to ${title}`}
-        >
-          <Plus className="h-4 w-4" />
-        </button>
+        {canWrite && (
+          <button
+            onClick={onAddTask}
+            className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            aria-label={`Add task to ${title}`}
+          >
+            <Plus className="h-4 w-4" />
+          </button>
+        )}
       </div>
 
       <div
@@ -49,7 +53,7 @@ export function BoardColumn({
       >
         <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
           {tasks.map((task) => (
-            <TaskCard key={task.id} task={task} onClick={() => onTaskClick(task)} />
+            <TaskCard key={task.id} task={task} onClick={() => onTaskClick(task)} readOnly={!canWrite} />
           ))}
         </SortableContext>
         {tasks.length === 0 && (

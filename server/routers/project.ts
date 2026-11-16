@@ -1,15 +1,12 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { router, protectedProcedure, projectProcedure } from "@/server/trpc";
-import { getMemberOrThrow, scopedWrite } from "@/server/lib/guards";
+import { Prisma } from "@prisma/client";
+import { router, protectedProcedure, projectProcedure, adminProcedure } from "@/server/trpc";
+import { assertNotLastAdmin, getMemberOrThrow, scopedWrite } from "@/server/lib/guards";
 
 const roleSchema = z.enum(["ADMIN", "MEMBER", "VIEWER"]);
 
-function requireAdmin(role: string) {
-  if (role !== "ADMIN") {
-    throw new TRPCError({ code: "FORBIDDEN", message: "Only project admins can perform this action" });
-  }
-}
+const serializable = { isolationLevel: Prisma.TransactionIsolationLevel.Serializable };
 
 export const projectRouter = router({
   list: protectedProcedure.query(async ({ ctx }) => {
@@ -81,7 +78,7 @@ export const projectRouter = router({
       });
     }),
 
-  inviteMember: projectProcedure
+  inviteMember: adminProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -90,8 +87,6 @@ export const projectRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      requireAdmin(ctx.membership.role);
-
       const user = await ctx.prisma.user.findUnique({ where: { email: input.email } });
       if (!user) {
         throw new TRPCError({
@@ -113,7 +108,7 @@ export const projectRouter = router({
       });
     }),
 
-  updateMemberRole: projectProcedure
+  updateMemberRole: adminProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -122,27 +117,36 @@ export const projectRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      requireAdmin(ctx.membership.role);
-      await getMemberOrThrow(ctx.prisma, input.projectId, input.memberId);
-      return scopedWrite(
-        "Member",
-        ctx.prisma.projectMember.update({
-          where: { id: input.memberId, projectId: input.projectId },
-          data: { role: input.role },
-        })
-      );
+      return ctx.prisma.$transaction(async (tx) => {
+        const target = await getMemberOrThrow(tx, input.projectId, input.memberId);
+        if (target.role === "ADMIN" && input.role !== "ADMIN") {
+          await assertNotLastAdmin(tx, input.projectId);
+        }
+        return scopedWrite(
+          "Member",
+          tx.projectMember.update({
+            where: { id: input.memberId, projectId: input.projectId },
+            data: { role: input.role },
+          })
+        );
+      }, serializable);
     }),
 
-  removeMember: projectProcedure
+  removeMember: adminProcedure
     .input(z.object({ projectId: z.string(), memberId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      requireAdmin(ctx.membership.role);
-      await getMemberOrThrow(ctx.prisma, input.projectId, input.memberId);
-      return scopedWrite(
-        "Member",
-        ctx.prisma.projectMember.delete({
-          where: { id: input.memberId, projectId: input.projectId },
-        })
-      );
+      // Covers an admin removing themselves too: the last admin cannot leave.
+      return ctx.prisma.$transaction(async (tx) => {
+        const target = await getMemberOrThrow(tx, input.projectId, input.memberId);
+        if (target.role === "ADMIN") {
+          await assertNotLastAdmin(tx, input.projectId);
+        }
+        return scopedWrite(
+          "Member",
+          tx.projectMember.delete({
+            where: { id: input.memberId, projectId: input.projectId },
+          })
+        );
+      }, serializable);
     }),
 });

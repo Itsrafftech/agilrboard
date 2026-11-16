@@ -4,6 +4,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Plus, ArrowRightCircle } from "lucide-react";
 import { trpc } from "@/lib/trpc";
+import { useProjectRole } from "@/lib/use-project-role";
 import { ProjectHeader } from "@/components/project/project-header";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -21,6 +22,7 @@ export default function BacklogPage({ params }: { params: { projectId: string } 
     { mode: "create" } | { mode: "edit"; task: BacklogTask } | null
   >(null);
 
+  const { canWrite } = useProjectRole(projectId);
   const { data: tasks, isLoading } = trpc.task.backlog.useQuery({ projectId });
   const { data: project } = trpc.project.get.useQuery({ projectId });
   const { data: activeSprint } = trpc.sprint.active.useQuery({ projectId });
@@ -44,10 +46,12 @@ export default function BacklogPage({ params }: { params: { projectId: string } 
         title="Backlog"
         description="Tasks not yet planned into a sprint."
         action={
-          <Button onClick={() => setModalState({ mode: "create" })}>
-            <Plus className="h-4 w-4" />
-            New task
-          </Button>
+          canWrite && (
+            <Button onClick={() => setModalState({ mode: "create" })}>
+              <Plus className="h-4 w-4" />
+              New task
+            </Button>
+          )
         }
       />
 
@@ -96,6 +100,7 @@ export default function BacklogPage({ params }: { params: { projectId: string } 
               ) : (
                 <div className="h-7 w-7 rounded-full border border-dashed border-slate-200" />
               )}
+              {canWrite && (
               <button
                 disabled={!activeSprint || addToSprint.isLoading}
                 onClick={(e) => {
@@ -108,6 +113,7 @@ export default function BacklogPage({ params }: { params: { projectId: string } 
               >
                 <ArrowRightCircle className="h-4 w-4" />
               </button>
+              )}
             </div>
           ))}
         </Card>
@@ -129,6 +135,7 @@ export default function BacklogPage({ params }: { params: { projectId: string } 
         members={members}
         labels={labels}
         task={modalState?.mode === "edit" ? modalState.task : undefined}
+        readOnly={!canWrite}
       />
     </div>
   );

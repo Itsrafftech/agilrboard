@@ -80,3 +80,18 @@ export async function scopedWrite<T>(entity: string, op: Promise<T>): Promise<T>
     throw e;
   }
 }
+
+/**
+ * Call BEFORE demoting or removing a member who is currently an ADMIN. Throws
+ * if that member is the project's only admin. Run inside a Serializable
+ * transaction so two concurrent demotions cannot both pass the check.
+ */
+export async function assertNotLastAdmin(db: Db, projectId: string) {
+  const admins = await db.projectMember.count({ where: { projectId, role: "ADMIN" } });
+  if (admins <= 1) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "A project must keep at least one admin. Promote another member first.",
+    });
+  }
+}

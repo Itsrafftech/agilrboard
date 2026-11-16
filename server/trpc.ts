@@ -67,3 +67,19 @@ const isProjectMember = middleware(async ({ ctx, rawInput, next }) => {
 });
 
 export const projectProcedure = t.procedure.use(isProjectMember);
+
+/** Any mutation that changes project content: Viewers are read-only. */
+export const writerProcedure = projectProcedure.use(({ ctx, next }) => {
+  if (ctx.membership.role === "VIEWER") {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Viewers have read-only access to this project" });
+  }
+  return next();
+});
+
+/** Member management and other project-level administration. */
+export const adminProcedure = projectProcedure.use(({ ctx, next }) => {
+  if (ctx.membership.role !== "ADMIN") {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Only project admins can perform this action" });
+  }
+  return next();
+});

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { router, projectProcedure } from "@/server/trpc";
+import { router, projectProcedure, writerProcedure } from "@/server/trpc";
 import {
   assertTaskRefsInProject,
   getSprintOrThrow,
@@ -39,7 +39,7 @@ export const taskRouter = router({
       });
     }),
 
-  create: projectProcedure
+  create: writerProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -85,7 +85,7 @@ export const taskRouter = router({
       });
     }),
 
-  update: projectProcedure
+  update: writerProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -122,7 +122,7 @@ export const taskRouter = router({
       );
     }),
 
-  move: projectProcedure
+  move: writerProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -156,7 +156,7 @@ export const taskRouter = router({
       });
     }),
 
-  delete: projectProcedure
+  delete: writerProcedure
     .input(z.object({ projectId: z.string(), taskId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       await getTaskOrThrow(ctx.prisma, input.projectId, input.taskId);
@@ -166,7 +166,7 @@ export const taskRouter = router({
       );
     }),
 
-  addToSprint: projectProcedure
+  addToSprint: writerProcedure
     .input(z.object({ projectId: z.string(), taskId: z.string(), sprintId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       await getTaskOrThrow(ctx.prisma, input.projectId, input.taskId);
@@ -181,7 +181,7 @@ export const taskRouter = router({
       );
     }),
 
-  removeFromSprint: projectProcedure
+  removeFromSprint: writerProcedure
     .input(z.object({ projectId: z.string(), taskId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       await getTaskOrThrow(ctx.prisma, input.projectId, input.taskId);
@@ -195,7 +195,7 @@ export const taskRouter = router({
       );
     }),
 
-  addComment: projectProcedure
+  addComment: writerProcedure
     .input(z.object({ projectId: z.string(), taskId: z.string(), body: z.string().min(1).max(2000) }))
     .mutation(async ({ ctx, input }) => {
       await getTaskOrThrow(ctx.prisma, input.projectId, input.taskId);

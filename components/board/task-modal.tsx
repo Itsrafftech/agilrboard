@@ -21,6 +21,7 @@ export function TaskModal({
   task,
   defaultStatus,
   defaultSprintId,
+  readOnly = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -30,6 +31,8 @@ export function TaskModal({
   task?: TaskWithRelations & { status: TaskStatus };
   defaultStatus?: TaskStatus;
   defaultSprintId?: string | null;
+  /** Viewers: show the task but disable every field and hide save/delete. */
+  readOnly?: boolean;
 }) {
   const isEditing = !!task;
   const utils = trpc.useUtils();
@@ -136,6 +139,7 @@ export function TaskModal({
   return (
     <Modal open={open} onClose={onClose} title={isEditing ? "Edit task" : "New task"} className="max-w-xl">
       <form onSubmit={handleSubmit} className="space-y-4">
+        <fieldset disabled={readOnly} className="m-0 min-w-0 space-y-4 border-0 p-0">
         <div className="space-y-1.5">
           <Label htmlFor="task-title">Title</Label>
           <Input
@@ -233,6 +237,15 @@ export function TaskModal({
           </div>
         )}
 
+        </fieldset>
+
+        {readOnly ? (
+          <div className="flex justify-end pt-2">
+            <Button type="button" variant="secondary" onClick={onClose}>
+              Close
+            </Button>
+          </div>
+        ) : (
         <div className="flex items-center justify-between pt-2">
           {isEditing ? (
             <button
@@ -254,6 +267,7 @@ export function TaskModal({
             </Button>
           </div>
         </div>
+        )}
       </form>
     </Modal>
   );

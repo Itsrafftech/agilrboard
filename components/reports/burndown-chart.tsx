@@ -4,6 +4,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { trpc } from "@/lib/trpc";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { HistoryNote } from "@/components/reports/history-note";
 
 export function BurndownChart({ projectId, sprintId }: { projectId: string; sprintId: string }) {
   const { data, isLoading } = trpc.report.burndown.useQuery({ projectId, sprintId });
@@ -14,6 +15,10 @@ export function BurndownChart({ projectId, sprintId }: { projectId: string; spri
       <p className="mb-4 text-xs text-slate-500">Remaining story points vs. the ideal pace</p>
 
       {isLoading && <Skeleton className="h-64 w-full" />}
+
+      {!isLoading && data && (
+        <HistoryNote history={data.history} trackedFrom={data.trackedFrom} untrackedTasks={data.untrackedTasks} />
+      )}
 
       {!isLoading && data && (
         <div className="h-64 w-full">

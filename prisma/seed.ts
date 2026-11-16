@@ -273,7 +273,7 @@ async function main() {
       dueDate.setDate(now.getDate() + t.daysFromNow);
     }
 
-    await prisma.task.create({
+    const created = await prisma.task.create({
       data: {
         projectId: project.id,
         sprintId: t.sprintId,
@@ -289,6 +289,28 @@ async function main() {
         labels: { connect: [{ id: labelByName(t.label).id }] },
       },
     });
+
+    // SYNTHETIC demo history (this is fake sample data, like the tasks themselves):
+    // created at the sprint start, then walked one status per day up to the final status.
+    const path: TaskStatus[] = ["TODO", "IN_PROGRESS", "IN_REVIEW", "DONE"];
+    const target = path.indexOf(t.status);
+    const base = { taskId: created.id, projectId: project.id, changedById: alice.id };
+    if (t.sprintId && target >= 0) {
+      const at = (day: number) =>
+        new Date(Math.min(sprintStart.getTime() + day * 86_400_000 + i * 3_600_000, now.getTime() - 3_600_000));
+      await prisma.taskStatusChange.create({
+        data: { ...base, sprintId: t.sprintId, fromStatus: null, toStatus: "TODO", changedAt: at(0) },
+      });
+      for (let k = 1; k <= target; k++) {
+        await prisma.taskStatusChange.create({
+          data: { ...base, sprintId: t.sprintId, fromStatus: path[k - 1], toStatus: path[k], changedAt: at(k) },
+        });
+      }
+    } else {
+      await prisma.taskStatusChange.create({
+        data: { ...base, sprintId: t.sprintId, fromStatus: null, toStatus: t.status, changedAt: new Date(now.getTime() - 5 * 86_400_000) },
+      });
+    }
   }
 
   console.log("Seed complete:");

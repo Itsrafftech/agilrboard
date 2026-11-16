@@ -4,6 +4,7 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { trpc } from "@/lib/trpc";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { HistoryNote } from "@/components/reports/history-note";
 
 const STATUS_COLORS: Record<string, string> = {
   BACKLOG: "#e2e8f0",
@@ -32,6 +33,14 @@ export function CumulativeFlowChart({ projectId, sprintId }: { projectId: string
       {isLoading && <Skeleton className="h-64 w-full" />}
 
       {!isLoading && data && (
+        <HistoryNote history={data.history} trackedFrom={data.trackedFrom} untrackedTasks={data.untrackedTasks} />
+      )}
+
+      {!isLoading && data && data.series.length === 0 && (
+        <p className="py-10 text-center text-sm text-slate-400">No history to chart for this sprint.</p>
+      )}
+
+      {!isLoading && data && data.series.length > 0 && (
         <div className="h-64 w-full">
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={data.series} margin={{ top: 8, right: 8, left: 0, bottom: 8 }}>
@@ -43,7 +52,7 @@ export function CumulativeFlowChart({ projectId, sprintId }: { projectId: string
                 wrapperStyle={{ fontSize: 12 }}
                 formatter={(value) => STATUS_LABELS[value] ?? value}
               />
-              {(["BACKLOG", "TODO", "IN_PROGRESS", "IN_REVIEW", "DONE"] as const).map((status) => (
+              {(["TODO", "IN_PROGRESS", "IN_REVIEW", "DONE"] as const).map((status) => (
                 <Area
                   key={status}
                   type="monotone"

@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
+import { TRPCError } from "@trpc/server";
 import { router, projectProcedure, writerProcedure } from "@/server/trpc";
+import { recordStatusChange, setTaskSprint } from "@/server/lib/history";
 import {
   assertTaskRefsInProject,
   getSprintOrThrow,
@@ -57,30 +59,47 @@ export const taskRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      await assertTaskRefsInProject(ctx.prisma, input.projectId, {
-        assigneeId: input.assigneeId,
-        sprintId: input.sprintId,
-        labelIds: input.labelIds,
-      });
+      if (input.sprintId && input.status === "BACKLOG") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "A task in a sprint cannot have status BACKLOG" });
+      }
 
-      const position = await nextPosition(ctx.prisma, input.projectId, input.sprintId ?? null, input.status);
-
-      return ctx.prisma.task.create({
-        data: {
-          projectId: input.projectId,
-          title: input.title,
-          description: input.description,
-          status: input.status,
-          priority: input.priority,
+      return ctx.prisma.$transaction(async (tx) => {
+        await assertTaskRefsInProject(tx, input.projectId, {
           assigneeId: input.assigneeId,
-          dueDate: input.dueDate,
-          storyPoints: input.storyPoints,
-          sprintId: input.sprintId ?? null,
-          creatorId: ctx.session.user.id,
-          position,
-          labels: input.labelIds ? { connect: input.labelIds.map((id) => ({ id })) } : undefined,
-        },
-        include: taskInclude,
+          sprintId: input.sprintId,
+          labelIds: input.labelIds,
+        });
+
+        const sprintId = input.sprintId ?? null;
+        const position = await nextPosition(tx, input.projectId, sprintId, input.status);
+
+        const task = await tx.task.create({
+          data: {
+            projectId: input.projectId,
+            title: input.title,
+            description: input.description,
+            status: input.status,
+            priority: input.priority,
+            assigneeId: input.assigneeId,
+            dueDate: input.dueDate,
+            storyPoints: input.storyPoints,
+            sprintId,
+            creatorId: ctx.session.user.id,
+            position,
+            labels: input.labelIds ? { connect: input.labelIds.map((id) => ({ id })) } : undefined,
+          },
+          include: taskInclude,
+        });
+
+        await recordStatusChange(tx, {
+          taskId: task.id,
+          projectId: input.projectId,
+          sprintId,
+          from: null,
+          to: input.status,
+          userId: ctx.session.user.id,
+        });
+        return task;
       });
     }),
 
@@ -100,25 +119,35 @@ export const taskRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const { projectId, taskId, labelIds, ...data } = input;
-      await getTaskOrThrow(ctx.prisma, projectId, taskId);
-      await assertTaskRefsInProject(ctx.prisma, projectId, {
-        assigneeId: data.assigneeId,
-        sprintId: data.sprintId,
-        labelIds,
-      });
+      const { projectId, taskId, labelIds, sprintId, ...data } = input;
 
-      return scopedWrite(
-        "Task",
-        ctx.prisma.task.update({
-          where: { id: taskId, projectId },
-          data: {
-            ...data,
-            labels: labelIds ? { set: labelIds.map((id) => ({ id })) } : undefined,
-          },
-          include: taskInclude,
-        })
-      );
+      return ctx.prisma.$transaction(async (tx) => {
+        const task = await getTaskOrThrow(tx, projectId, taskId);
+        await assertTaskRefsInProject(tx, projectId, {
+          assigneeId: data.assigneeId,
+          sprintId,
+          labelIds,
+        });
+
+        const updated = await scopedWrite(
+          "Task",
+          tx.task.update({
+            where: { id: taskId, projectId },
+            data: {
+              ...data,
+              labels: labelIds ? { set: labelIds.map((id) => ({ id })) } : undefined,
+            },
+            include: taskInclude,
+          })
+        );
+
+        // Changing the sprint is a status event too (same rules as add/removeFromSprint).
+        if (sprintId !== undefined && sprintId !== task.sprintId) {
+          await scopedWrite("Task", setTaskSprint(tx, task, sprintId, ctx.session.user.id));
+          return tx.task.findFirstOrThrow({ where: { id: taskId, projectId }, include: taskInclude });
+        }
+        return updated;
+      });
     }),
 
   move: writerProcedure
@@ -134,6 +163,12 @@ export const taskRouter = router({
       return ctx.prisma.$transaction(
         async (tx) => {
           const task = await getTaskOrThrow(tx, input.projectId, input.taskId);
+          if (task.sprintId && input.status === "BACKLOG") {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "Use removeFromSprint to send a sprint task back to the backlog",
+            });
+          }
 
           // Order only inside the destination column: same project, same sprint
           // (or the backlog when sprintId is null) and the target status.
@@ -167,6 +202,15 @@ export const taskRouter = router({
             });
           }
 
+          await recordStatusChange(tx, {
+            taskId: task.id,
+            projectId: input.projectId,
+            sprintId: task.sprintId,
+            from: task.status,
+            to: input.status,
+            userId: ctx.session.user.id,
+          });
+
           return tx.task.update({
             where: { id: task.id, projectId: input.projectId },
             data: { status: input.status, position: index },
@@ -190,32 +234,28 @@ export const taskRouter = router({
   addToSprint: writerProcedure
     .input(z.object({ projectId: z.string(), taskId: z.string(), sprintId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      await getTaskOrThrow(ctx.prisma, input.projectId, input.taskId);
-      await getSprintOrThrow(ctx.prisma, input.projectId, input.sprintId);
-      const position = await nextPosition(ctx.prisma, input.projectId, input.sprintId, "TODO");
-      return scopedWrite(
-        "Task",
-        ctx.prisma.task.update({
+      return ctx.prisma.$transaction(async (tx) => {
+        const task = await getTaskOrThrow(tx, input.projectId, input.taskId);
+        await getSprintOrThrow(tx, input.projectId, input.sprintId);
+        await scopedWrite("Task", setTaskSprint(tx, task, input.sprintId, ctx.session.user.id));
+        return tx.task.findFirstOrThrow({
           where: { id: input.taskId, projectId: input.projectId },
-          data: { sprintId: input.sprintId, status: "TODO", position },
           include: taskInclude,
-        })
-      );
+        });
+      });
     }),
 
   removeFromSprint: writerProcedure
     .input(z.object({ projectId: z.string(), taskId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      await getTaskOrThrow(ctx.prisma, input.projectId, input.taskId);
-      const position = await nextPosition(ctx.prisma, input.projectId, null, "BACKLOG");
-      return scopedWrite(
-        "Task",
-        ctx.prisma.task.update({
+      return ctx.prisma.$transaction(async (tx) => {
+        const task = await getTaskOrThrow(tx, input.projectId, input.taskId);
+        await scopedWrite("Task", setTaskSprint(tx, task, null, ctx.session.user.id));
+        return tx.task.findFirstOrThrow({
           where: { id: input.taskId, projectId: input.projectId },
-          data: { sprintId: null, status: "BACKLOG", position },
           include: taskInclude,
-        })
-      );
+        });
+      });
     }),
 
   addComment: writerProcedure

@@ -9,6 +9,13 @@ import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 
+const AUTH_ERRORS: Record<string, string> = {
+  OAuthAccountNotLinked:
+    "An account with this email already exists and was created with a password. Sign in with your email and password instead of Google.",
+  AccessDenied: "Access denied.",
+  RateLimited: "Too many attempts. Please wait a few minutes and try again.",
+};
+
 function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
@@ -16,6 +23,10 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [demoLoading, setDemoLoading] = useState(false);
+  const urlError = params.get("error");
+  const urlErrorMessage = urlError
+    ? AUTH_ERRORS[urlError] ?? "Sign-in failed. Please try again."
+    : null;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -28,7 +39,7 @@ function LoginForm() {
     setLoading(false);
 
     if (res?.error) {
-      toast.error("Invalid email or password");
+      toast.error(AUTH_ERRORS[res.error] ?? "Invalid email or password");
       return;
     }
     toast.success("Welcome back!");
@@ -52,6 +63,11 @@ function LoginForm() {
 
   return (
     <Card className="p-6">
+      {urlErrorMessage && (
+        <p role="alert" className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {urlErrorMessage}
+        </p>
+      )}
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-1.5">
           <Label htmlFor="email">Email</Label>

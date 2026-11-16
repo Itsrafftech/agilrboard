@@ -44,7 +44,8 @@ cp .env.example .env
 
 | Variable | Description |
 | --- | --- |
-| `DATABASE_URL` | PostgreSQL connection string |
+| `DATABASE_URL` | PostgreSQL connection string (use the pooler URL if you have one) |
+| `DIRECT_URL` | Direct (non-pooled) connection string used by the Prisma CLI. Same as `DATABASE_URL` locally |
 | `NEXTAUTH_URL` | Base URL of the app, e.g. `http://localhost:3000` |
 | `NEXTAUTH_SECRET` | Random secret — generate with `openssl rand -base64 32` |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Optional — from the [Google Cloud Console](https://console.cloud.google.com/apis/credentials) to enable "Continue with Google". Leave blank to use credentials-only login. |

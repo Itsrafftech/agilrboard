@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 import { TRPCError } from "@trpc/server";
+import type { TaskStatus } from "@prisma/client";
 
 /** Works with both the root client and an interactive-transaction client. */
 export type Db = Pick<PrismaClient, "task" | "sprint" | "projectMember" | "label">;
@@ -94,4 +95,21 @@ export async function assertNotLastAdmin(db: Db, projectId: string) {
       message: "A project must keep at least one admin. Promote another member first.",
     });
   }
+}
+
+/**
+ * Next free `position` at the bottom of one board column. A column is
+ * (project, sprint-or-backlog, status) — the same scope the board orders by.
+ */
+export async function nextPosition(
+  db: Db,
+  projectId: string,
+  sprintId: string | null,
+  status: TaskStatus
+) {
+  const agg = await db.task.aggregate({
+    where: { projectId, sprintId, status },
+    _max: { position: true },
+  });
+  return (agg._max.position ?? -1) + 1;
 }

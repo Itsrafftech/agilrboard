@@ -1,9 +1,11 @@
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { router, projectProcedure, writerProcedure } from "@/server/trpc";
 import {
   assertTaskRefsInProject,
   getSprintOrThrow,
   getTaskOrThrow,
+  nextPosition,
   scopedWrite,
 } from "@/server/lib/guards";
 
@@ -61,10 +63,7 @@ export const taskRouter = router({
         labelIds: input.labelIds,
       });
 
-      const maxPos = await ctx.prisma.task.aggregate({
-        where: { projectId: input.projectId, status: input.status },
-        _max: { position: true },
-      });
+      const position = await nextPosition(ctx.prisma, input.projectId, input.sprintId ?? null, input.status);
 
       return ctx.prisma.task.create({
         data: {
@@ -78,7 +77,7 @@ export const taskRouter = router({
           storyPoints: input.storyPoints,
           sprintId: input.sprintId ?? null,
           creatorId: ctx.session.user.id,
-          position: (maxPos._max.position ?? -1) + 1,
+          position,
           labels: input.labelIds ? { connect: input.labelIds.map((id) => ({ id })) } : undefined,
         },
         include: taskInclude,
@@ -132,28 +131,50 @@ export const taskRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const task = await getTaskOrThrow(ctx.prisma, input.projectId, input.taskId);
+      return ctx.prisma.$transaction(
+        async (tx) => {
+          const task = await getTaskOrThrow(tx, input.projectId, input.taskId);
 
-      const siblings = await ctx.prisma.task.findMany({
-        where: { projectId: input.projectId, status: input.status, id: { not: input.taskId } },
-        orderBy: { position: "asc" },
-      });
+          // Order only inside the destination column: same project, same sprint
+          // (or the backlog when sprintId is null) and the target status.
+          const siblings = await tx.task.findMany({
+            where: {
+              projectId: input.projectId,
+              sprintId: task.sprintId,
+              status: input.status,
+              id: { not: task.id },
+            },
+            orderBy: [{ position: "asc" }, { id: "asc" }],
+            select: { id: true, position: true },
+          });
 
-      siblings.splice(input.position, 0, { ...task, status: input.status });
+          const index = Math.min(input.position, siblings.length);
+          const ordered = [...siblings.slice(0, index), { id: task.id, position: -1 }, ...siblings.slice(index)];
 
-      await ctx.prisma.$transaction(
-        siblings.map((s, idx) =>
-          ctx.prisma.task.update({
-            where: { id: s.id, projectId: input.projectId },
-            data: { position: idx, status: input.status },
-          })
-        )
+          // Only touch rows whose position actually changes. Rows that shift by the
+          // same amount (the usual case: everything below the insertion point moves
+          // by one) are updated with a single increment statement.
+          const byDelta = new Map<number, string[]>();
+          ordered.forEach((row, idx) => {
+            if (row.id === task.id) return;
+            const delta = idx - row.position;
+            if (delta !== 0) byDelta.set(delta, [...(byDelta.get(delta) ?? []), row.id]);
+          });
+          for (const [delta, ids] of Array.from(byDelta.entries())) {
+            await tx.task.updateMany({
+              where: { id: { in: ids }, projectId: input.projectId },
+              data: { position: { increment: delta } },
+            });
+          }
+
+          return tx.task.update({
+            where: { id: task.id, projectId: input.projectId },
+            data: { status: input.status, position: index },
+            include: taskInclude,
+          });
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
       );
-
-      return ctx.prisma.task.findFirst({
-        where: { id: input.taskId, projectId: input.projectId },
-        include: taskInclude,
-      });
     }),
 
   delete: writerProcedure
@@ -171,11 +192,12 @@ export const taskRouter = router({
     .mutation(async ({ ctx, input }) => {
       await getTaskOrThrow(ctx.prisma, input.projectId, input.taskId);
       await getSprintOrThrow(ctx.prisma, input.projectId, input.sprintId);
+      const position = await nextPosition(ctx.prisma, input.projectId, input.sprintId, "TODO");
       return scopedWrite(
         "Task",
         ctx.prisma.task.update({
           where: { id: input.taskId, projectId: input.projectId },
-          data: { sprintId: input.sprintId, status: "TODO" },
+          data: { sprintId: input.sprintId, status: "TODO", position },
           include: taskInclude,
         })
       );
@@ -185,11 +207,12 @@ export const taskRouter = router({
     .input(z.object({ projectId: z.string(), taskId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       await getTaskOrThrow(ctx.prisma, input.projectId, input.taskId);
+      const position = await nextPosition(ctx.prisma, input.projectId, null, "BACKLOG");
       return scopedWrite(
         "Task",
         ctx.prisma.task.update({
           where: { id: input.taskId, projectId: input.projectId },
-          data: { sprintId: null, status: "BACKLOG" },
+          data: { sprintId: null, status: "BACKLOG", position },
           include: taskInclude,
         })
       );

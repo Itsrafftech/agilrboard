@@ -4,10 +4,11 @@ import { getServerSession } from "next-auth";
 import superjson from "superjson";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { clientIp } from "@/lib/rate-limit";
 
-export async function createContext(_opts: FetchCreateContextFnOptions) {
+export async function createContext(opts: FetchCreateContextFnOptions) {
   const session = await getServerSession(authOptions);
-  return { session, prisma };
+  return { session, prisma, ip: clientIp(opts.req.headers) as string | null };
 }
 
 type Context = Awaited<ReturnType<typeof createContext>>;

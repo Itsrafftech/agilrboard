@@ -93,6 +93,17 @@ Open [http://localhost:3000](http://localhost:3000) and sign in with a seeded us
 | `npm run db:seed` | Seed demo data |
 | `npm run db:studio` | Open Prisma Studio to browse data |
 
+## Tests
+
+Authorization tests (Vitest) call the tRPC routers directly against a real, throwaway PostgreSQL. They cover cross-project access, viewer/admin roles, last-admin protection, foreign assignee/sprint/label ids, the demo sandbox and task ordering.
+
+```bash
+npm run test:db:up   # starts Postgres on localhost:54329 (RAM-backed, docker compose profile "test")
+npm test             # runs the suite once
+```
+
+The suite uses `TEST_DATABASE_URL` (default `postgresql://postgres:postgres@localhost:54329/agileboard_test`) and **never** `DATABASE_URL`. It refuses to start unless the host is local and the database name ends in `_test`. Data is truncated between tests. To start from a blank schema: `docker compose --profile test down && npm run test:db:up`.
+
 ## Project Structure
 
 ```

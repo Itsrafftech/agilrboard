@@ -1,5 +1,11 @@
 import { z } from "zod";
 import { router, projectProcedure } from "@/server/trpc";
+import {
+  assertTaskRefsInProject,
+  getSprintOrThrow,
+  getTaskOrThrow,
+  scopedWrite,
+} from "@/server/lib/guards";
 
 const statusSchema = z.enum(["BACKLOG", "TODO", "IN_PROGRESS", "IN_REVIEW", "DONE"]);
 const prioritySchema = z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]);
@@ -49,6 +55,12 @@ export const taskRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await assertTaskRefsInProject(ctx.prisma, input.projectId, {
+        assigneeId: input.assigneeId,
+        sprintId: input.sprintId,
+        labelIds: input.labelIds,
+      });
+
       const maxPos = await ctx.prisma.task.aggregate({
         where: { projectId: input.projectId, status: input.status },
         _max: { position: true },
@@ -90,14 +102,24 @@ export const taskRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const { projectId, taskId, labelIds, ...data } = input;
-      return ctx.prisma.task.update({
-        where: { id: taskId },
-        data: {
-          ...data,
-          labels: labelIds ? { set: labelIds.map((id) => ({ id })) } : undefined,
-        },
-        include: taskInclude,
+      await getTaskOrThrow(ctx.prisma, projectId, taskId);
+      await assertTaskRefsInProject(ctx.prisma, projectId, {
+        assigneeId: data.assigneeId,
+        sprintId: data.sprintId,
+        labelIds,
       });
+
+      return scopedWrite(
+        "Task",
+        ctx.prisma.task.update({
+          where: { id: taskId, projectId },
+          data: {
+            ...data,
+            labels: labelIds ? { set: labelIds.map((id) => ({ id })) } : undefined,
+          },
+          include: taskInclude,
+        })
+      );
     }),
 
   move: projectProcedure
@@ -110,8 +132,7 @@ export const taskRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const task = await ctx.prisma.task.findUnique({ where: { id: input.taskId } });
-      if (!task) return null;
+      const task = await getTaskOrThrow(ctx.prisma, input.projectId, input.taskId);
 
       const siblings = await ctx.prisma.task.findMany({
         where: { projectId: input.projectId, status: input.status, id: { not: input.taskId } },
@@ -123,44 +144,61 @@ export const taskRouter = router({
       await ctx.prisma.$transaction(
         siblings.map((s, idx) =>
           ctx.prisma.task.update({
-            where: { id: s.id },
+            where: { id: s.id, projectId: input.projectId },
             data: { position: idx, status: input.status },
           })
         )
       );
 
-      return ctx.prisma.task.findUnique({ where: { id: input.taskId }, include: taskInclude });
+      return ctx.prisma.task.findFirst({
+        where: { id: input.taskId, projectId: input.projectId },
+        include: taskInclude,
+      });
     }),
 
   delete: projectProcedure
     .input(z.object({ projectId: z.string(), taskId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      return ctx.prisma.task.delete({ where: { id: input.taskId } });
+      await getTaskOrThrow(ctx.prisma, input.projectId, input.taskId);
+      return scopedWrite(
+        "Task",
+        ctx.prisma.task.delete({ where: { id: input.taskId, projectId: input.projectId } })
+      );
     }),
 
   addToSprint: projectProcedure
     .input(z.object({ projectId: z.string(), taskId: z.string(), sprintId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      return ctx.prisma.task.update({
-        where: { id: input.taskId },
-        data: { sprintId: input.sprintId, status: "TODO" },
-        include: taskInclude,
-      });
+      await getTaskOrThrow(ctx.prisma, input.projectId, input.taskId);
+      await getSprintOrThrow(ctx.prisma, input.projectId, input.sprintId);
+      return scopedWrite(
+        "Task",
+        ctx.prisma.task.update({
+          where: { id: input.taskId, projectId: input.projectId },
+          data: { sprintId: input.sprintId, status: "TODO" },
+          include: taskInclude,
+        })
+      );
     }),
 
   removeFromSprint: projectProcedure
     .input(z.object({ projectId: z.string(), taskId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      return ctx.prisma.task.update({
-        where: { id: input.taskId },
-        data: { sprintId: null, status: "BACKLOG" },
-        include: taskInclude,
-      });
+      await getTaskOrThrow(ctx.prisma, input.projectId, input.taskId);
+      return scopedWrite(
+        "Task",
+        ctx.prisma.task.update({
+          where: { id: input.taskId, projectId: input.projectId },
+          data: { sprintId: null, status: "BACKLOG" },
+          include: taskInclude,
+        })
+      );
     }),
 
   addComment: projectProcedure
     .input(z.object({ projectId: z.string(), taskId: z.string(), body: z.string().min(1).max(2000) }))
     .mutation(async ({ ctx, input }) => {
+      await getTaskOrThrow(ctx.prisma, input.projectId, input.taskId);
       return ctx.prisma.taskComment.create({
         data: { taskId: input.taskId, userId: ctx.session.user.id, body: input.body },
         include: { user: { select: { id: true, name: true, email: true, image: true } } },
@@ -170,8 +208,9 @@ export const taskRouter = router({
   comments: projectProcedure
     .input(z.object({ projectId: z.string(), taskId: z.string() }))
     .query(async ({ ctx, input }) => {
+      await getTaskOrThrow(ctx.prisma, input.projectId, input.taskId);
       return ctx.prisma.taskComment.findMany({
-        where: { taskId: input.taskId },
+        where: { taskId: input.taskId, task: { projectId: input.projectId } },
         include: { user: { select: { id: true, name: true, email: true, image: true } } },
         orderBy: { createdAt: "asc" },
       });

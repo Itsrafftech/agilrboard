@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { router, projectProcedure } from "@/server/trpc";
+import { getSprintOrThrow } from "@/server/lib/guards";
 
 function dateOnly(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -74,14 +75,13 @@ export const reportRouter = router({
   burndown: projectProcedure
     .input(z.object({ projectId: z.string(), sprintId: z.string() }))
     .query(async ({ ctx, input }) => {
-      const sprint = await ctx.prisma.sprint.findUnique({
-        where: { id: input.sprintId },
-        include: { tasks: true },
+      const sprint = await getSprintOrThrow(ctx.prisma, input.projectId, input.sprintId);
+      const tasks = await ctx.prisma.task.findMany({
+        where: { sprintId: sprint.id, projectId: input.projectId },
       });
-      if (!sprint) return null;
 
-      const totalPoints = sprint.tasks.reduce((sum, t) => sum + (t.storyPoints ?? 0), 0);
-      const remainingPoints = sprint.tasks
+      const totalPoints = tasks.reduce((sum, t) => sum + (t.storyPoints ?? 0), 0);
+      const remainingPoints = tasks
         .filter((t) => t.status !== "DONE")
         .reduce((sum, t) => sum + (t.storyPoints ?? 0), 0);
 
@@ -122,15 +122,14 @@ export const reportRouter = router({
   cumulativeFlow: projectProcedure
     .input(z.object({ projectId: z.string(), sprintId: z.string() }))
     .query(async ({ ctx, input }) => {
-      const sprint = await ctx.prisma.sprint.findUnique({
-        where: { id: input.sprintId },
-        include: { tasks: true },
+      const sprint = await getSprintOrThrow(ctx.prisma, input.projectId, input.sprintId);
+      const tasks = await ctx.prisma.task.findMany({
+        where: { sprintId: sprint.id, projectId: input.projectId },
       });
-      if (!sprint) return null;
 
       const statuses = ["BACKLOG", "TODO", "IN_PROGRESS", "IN_REVIEW", "DONE"] as const;
       const counts = Object.fromEntries(
-        statuses.map((s) => [s, sprint.tasks.filter((t) => t.status === s).length])
+        statuses.map((s) => [s, tasks.filter((t) => t.status === s).length])
       ) as Record<(typeof statuses)[number], number>;
 
       const days = eachDay(sprint.startDate, new Date() < sprint.endDate ? new Date() : sprint.endDate);

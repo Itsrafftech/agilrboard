@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, projectProcedure } from "@/server/trpc";
+import { getMemberOrThrow, scopedWrite } from "@/server/lib/guards";
 
 const roleSchema = z.enum(["ADMIN", "MEMBER", "VIEWER"]);
 
@@ -122,16 +123,26 @@ export const projectRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       requireAdmin(ctx.membership.role);
-      return ctx.prisma.projectMember.update({
-        where: { id: input.memberId },
-        data: { role: input.role },
-      });
+      await getMemberOrThrow(ctx.prisma, input.projectId, input.memberId);
+      return scopedWrite(
+        "Member",
+        ctx.prisma.projectMember.update({
+          where: { id: input.memberId, projectId: input.projectId },
+          data: { role: input.role },
+        })
+      );
     }),
 
   removeMember: projectProcedure
     .input(z.object({ projectId: z.string(), memberId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       requireAdmin(ctx.membership.role);
-      return ctx.prisma.projectMember.delete({ where: { id: input.memberId } });
+      await getMemberOrThrow(ctx.prisma, input.projectId, input.memberId);
+      return scopedWrite(
+        "Member",
+        ctx.prisma.projectMember.delete({
+          where: { id: input.memberId, projectId: input.projectId },
+        })
+      );
     }),
 });

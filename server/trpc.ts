@@ -34,6 +34,14 @@ const isAuthed = middleware(({ ctx, next }) => {
 
 export const protectedProcedure = t.procedure.use(isAuthed);
 
+/** Actions the shared demo account must never perform (e.g. creating projects). */
+export const nonDemoProcedure = protectedProcedure.use(({ ctx, next }) => {
+  if (ctx.session.user.isDemo) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Not available in demo mode" });
+  }
+  return next();
+});
+
 /**
  * Ensures the caller is a member of `input.projectId` and attaches their
  * membership (with role) to ctx, so downstream procedures can authorize
@@ -61,6 +69,18 @@ const isProjectMember = middleware(async ({ ctx, rawInput, next }) => {
     throw new TRPCError({ code: "FORBIDDEN", message: "Not a member of this project" });
   }
 
+  // Demo sessions are sandboxed to projects owned by the demo user, even if the
+  // demo account somehow ended up as a member of a real project.
+  if (ctx.session.user.isDemo) {
+    const project = await ctx.prisma.project.findUnique({
+      where: { id: input.projectId },
+      select: { ownerId: true },
+    });
+    if (!project || project.ownerId !== ctx.session.user.id) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "Not available in demo mode" });
+    }
+  }
+
   return next({
     ctx: { ...ctx, session: { ...ctx.session, user: ctx.session.user }, membership },
   });
@@ -78,7 +98,7 @@ export const writerProcedure = projectProcedure.use(({ ctx, next }) => {
 
 /** Member management and other project-level administration. */
 export const adminProcedure = projectProcedure.use(({ ctx, next }) => {
-  if (ctx.membership.role !== "ADMIN") {
+  if (ctx.membership.role !== "ADMIN" || ctx.session.user.isDemo) {
     throw new TRPCError({ code: "FORBIDDEN", message: "Only project admins can perform this action" });
   }
   return next();

@@ -2,6 +2,7 @@ import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { TRPCError } from "@trpc/server";
 import { router, publicProcedure, protectedProcedure } from "@/server/trpc";
+import { isDemoEmail } from "@/lib/demo";
 
 export const userRouter = router({
   register: publicProcedure
@@ -13,6 +14,10 @@ export const userRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      if (isDemoEmail(input.email)) {
+        throw new TRPCError({ code: "CONFLICT", message: "An account with this email already exists" });
+      }
+
       const existing = await ctx.prisma.user.findUnique({
         where: { email: input.email },
       });

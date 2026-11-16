@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { Prisma } from "@prisma/client";
-import { router, protectedProcedure, projectProcedure, adminProcedure } from "@/server/trpc";
+import { router, protectedProcedure, projectProcedure, adminProcedure, nonDemoProcedure } from "@/server/trpc";
+import { isDemoEmail } from "@/lib/demo";
 import { assertNotLastAdmin, getMemberOrThrow, scopedWrite } from "@/server/lib/guards";
 
 const roleSchema = z.enum(["ADMIN", "MEMBER", "VIEWER"]);
@@ -11,7 +12,11 @@ const serializable = { isolationLevel: Prisma.TransactionIsolationLevel.Serializ
 export const projectRouter = router({
   list: protectedProcedure.query(async ({ ctx }) => {
     const memberships = await ctx.prisma.projectMember.findMany({
-      where: { userId: ctx.session.user.id },
+      where: {
+        userId: ctx.session.user.id,
+        // Demo sessions only ever see the demo project(s) they own.
+        ...(ctx.session.user.isDemo ? { project: { ownerId: ctx.session.user.id } } : {}),
+      },
       include: {
         project: {
           include: {
@@ -44,7 +49,7 @@ export const projectRouter = router({
       return { ...project, myRole: ctx.membership.role };
     }),
 
-  create: protectedProcedure
+  create: nonDemoProcedure
     .input(
       z.object({
         name: z.string().min(1).max(100),
@@ -87,6 +92,10 @@ export const projectRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      if (isDemoEmail(input.email)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "The demo account cannot be added to projects" });
+      }
+
       const user = await ctx.prisma.user.findUnique({ where: { email: input.email } });
       if (!user) {
         throw new TRPCError({

@@ -67,7 +67,8 @@ npm run db:seed
 ```
 
 The seed script creates:
-- 3 demo users (`alice@agileboard.dev`, `bob@agileboard.dev`, `carol@agileboard.dev`), all with password `password123`
+- 3 users (`alice@agileboard.dev` is the project admin, `bob@agileboard.dev`, `carol@agileboard.dev`). Their password is `SEED_PASSWORD` if set, otherwise a random one printed once at the end of the seed output
+- A passwordless shared demo account (`demo@agileboard.dev`) behind the "Try Demo" button. It is sandboxed to the demo project and cannot create projects or manage members
 - One demo project ("AgileBoard Demo") with labels
 - A completed sprint (Sprint 0) and an active sprint (Sprint 1) with tasks in every status
 - Several backlog tasks not yet assigned to a sprint
@@ -78,7 +79,7 @@ The seed script creates:
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) and sign in with any seeded user.
+Open [http://localhost:3000](http://localhost:3000) and sign in with a seeded user (password from the seed output) or click **Try Demo**.
 
 ## Useful scripts
 

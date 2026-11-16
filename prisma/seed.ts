@@ -1,10 +1,16 @@
 import { PrismaClient, TaskStatus, TaskPriority } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { randomBytes } from "node:crypto";
 
 const prisma = new PrismaClient();
 
+// Never ship a publicly known password: use SEED_PASSWORD, or a random one that is printed once.
+const DEMO_EMAIL = (process.env.DEMO_USER_EMAIL ?? "demo@agileboard.dev").toLowerCase();
+const generatedPassword = process.env.SEED_PASSWORD ? null : randomBytes(9).toString("base64url");
+const seedPassword = process.env.SEED_PASSWORD ?? (generatedPassword as string);
+
 async function main() {
-  const password = await bcrypt.hash("password123", 10);
+  const password = await bcrypt.hash(seedPassword, 10);
 
   const [alice, bob, carol] = await Promise.all([
     prisma.user.upsert({
@@ -24,17 +30,32 @@ async function main() {
     }),
   ]);
 
+  // Shared demo account: no password (only the "demo" auth provider can sign in as it).
+  // It owns the demo project, which is what sandboxes demo sessions to that project.
+  const demo = await prisma.user.upsert({
+    where: { email: DEMO_EMAIL },
+    update: {},
+    create: { name: "Demo User", email: DEMO_EMAIL, password: null },
+  });
+
+  const existingDemoProject = await prisma.project.findFirst({ where: { ownerId: demo.id } });
+  if (existingDemoProject) {
+    console.log("Demo project already exists; skipping. Delete it first to re-seed.");
+    return;
+  }
+
   const project = await prisma.project.create({
     data: {
       name: "AgileBoard Demo",
       description: "A demo project showcasing sprints, boards, and reporting.",
       key: "AGB",
-      ownerId: alice.id,
+      ownerId: demo.id,
       projectMembers: {
         create: [
           { userId: alice.id, role: "ADMIN" },
           { userId: bob.id, role: "MEMBER" },
           { userId: carol.id, role: "MEMBER" },
+          { userId: demo.id, role: "MEMBER" },
         ],
       },
       labels: {
@@ -252,7 +273,7 @@ async function main() {
       dueDate.setDate(now.getDate() + t.daysFromNow);
     }
 
-    await prisma.task.create({
+    const created = await prisma.task.create({
       data: {
         projectId: project.id,
         sprintId: t.sprintId,
@@ -268,11 +289,38 @@ async function main() {
         labels: { connect: [{ id: labelByName(t.label).id }] },
       },
     });
+
+    // SYNTHETIC demo history (this is fake sample data, like the tasks themselves):
+    // created at the sprint start, then walked one status per day up to the final status.
+    const path: TaskStatus[] = ["TODO", "IN_PROGRESS", "IN_REVIEW", "DONE"];
+    const target = path.indexOf(t.status);
+    const base = { taskId: created.id, projectId: project.id, changedById: alice.id };
+    if (t.sprintId && target >= 0) {
+      const at = (day: number) =>
+        new Date(Math.min(sprintStart.getTime() + day * 86_400_000 + i * 3_600_000, now.getTime() - 3_600_000));
+      await prisma.taskStatusChange.create({
+        data: { ...base, sprintId: t.sprintId, fromStatus: null, toStatus: "TODO", changedAt: at(0) },
+      });
+      for (let k = 1; k <= target; k++) {
+        await prisma.taskStatusChange.create({
+          data: { ...base, sprintId: t.sprintId, fromStatus: path[k - 1], toStatus: path[k], changedAt: at(k) },
+        });
+      }
+    } else {
+      await prisma.taskStatusChange.create({
+        data: { ...base, sprintId: t.sprintId, fromStatus: null, toStatus: t.status, changedAt: new Date(now.getTime() - 5 * 86_400_000) },
+      });
+    }
   }
 
   console.log("Seed complete:");
   console.log(`  Users: ${[alice, bob, carol].map((u) => u.email).join(", ")}`);
-  console.log(`  Password for all demo users: password123`);
+  console.log(`  Demo account (no password, "Try Demo" button): ${DEMO_EMAIL}`);
+  if (generatedPassword) {
+    console.log(`  Password for alice/bob/carol (generated, shown once): ${generatedPassword}`);
+  } else {
+    console.log("  Password for alice/bob/carol: taken from SEED_PASSWORD");
+  }
   console.log(`  Project: ${project.name} (${project.key})`);
   console.log(`  Sprints: Sprint 0 (completed), Sprint 1 (active)`);
   console.log(`  Tasks: ${allTasks.length}`);

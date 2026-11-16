@@ -11,5 +11,19 @@ services:
     volumes:
       - agileboard_pgdata:/var/lib/postgresql/data
 
+  # Throwaway database for `npm test` (docker compose --profile test up -d db-test).
+  # RAM-backed and on a different port so it can never be mistaken for the dev DB.
+  db-test:
+    image: postgres:16-alpine
+    profiles: ["test"]
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: agileboard_test
+    ports:
+      - "54329:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+
 volumes:
   agileboard_pgdata:

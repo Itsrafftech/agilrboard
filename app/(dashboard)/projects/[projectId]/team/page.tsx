@@ -24,10 +24,12 @@ export default function TeamPage({ params }: { params: { projectId: string } }) 
         title="Team"
         description="Manage members and see how work is distributed."
         action={
-          <Button onClick={() => setInviteOpen(true)}>
-            <UserPlus className="h-4 w-4" />
-            Invite member
-          </Button>
+          project?.myRole === "ADMIN" && (
+            <Button onClick={() => setInviteOpen(true)}>
+              <UserPlus className="h-4 w-4" />
+              Invite member
+            </Button>
+          )
         }
       />
 

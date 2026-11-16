@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc";
+import { useProjectRole } from "@/lib/use-project-role";
 import { ProjectHeader } from "@/components/project/project-header";
 import { KanbanBoard } from "@/components/board/kanban-board";
 import { BoardSkeleton } from "@/components/ui/skeleton";
@@ -16,6 +17,7 @@ type BoardTask = TaskWithRelations & { status: TaskStatus };
 export default function BoardPage({ params }: { params: { projectId: string } }) {
   const { projectId } = params;
   const [assigneeId, setAssigneeId] = useState<string>("all");
+  const { canWrite } = useProjectRole(projectId);
 
   const { data: sprint, isLoading: sprintLoading } = trpc.sprint.active.useQuery({ projectId });
   const { data: project, isLoading: projectLoading } = trpc.project.get.useQuery({ projectId });
@@ -72,6 +74,7 @@ export default function BoardPage({ params }: { params: { projectId: string } })
           tasks={visibleTasks}
           members={members}
           labels={labels}
+          canWrite={canWrite}
         />
       )}
     </div>

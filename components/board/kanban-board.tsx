@@ -26,12 +26,14 @@ export function KanbanBoard({
   tasks,
   members,
   labels,
+  canWrite,
 }: {
   projectId: string;
   sprintId: string;
   tasks: BoardTask[];
   members: { id: string; name: string | null; email: string }[];
   labels: { id: string; name: string; color: string }[];
+  canWrite: boolean;
 }) {
   const [items, setItems] = useState(tasks);
   const [activeTask, setActiveTask] = useState<BoardTask | null>(null);
@@ -61,12 +63,14 @@ export function KanbanBoard({
   }
 
   function handleDragStart(event: DragStartEvent) {
+    if (!canWrite) return;
     const task = items.find((t) => t.id === event.active.id);
     setActiveTask(task ?? null);
   }
 
   function handleDragEnd(event: DragEndEvent) {
     setActiveTask(null);
+    if (!canWrite) return;
     const { active, over } = event;
     if (!over) return;
 
@@ -111,6 +115,7 @@ export function KanbanBoard({
               id={col.value}
               title={col.label}
               tasks={columnTasks(col.value)}
+              canWrite={canWrite}
               onAddTask={() => setModalState({ mode: "create", status: col.value })}
               onTaskClick={(task) => setModalState({ mode: "edit", task: task as BoardTask })}
             />
@@ -118,7 +123,7 @@ export function KanbanBoard({
         </div>
 
         <DragOverlay>
-          {activeTask ? <TaskCard task={activeTask} onClick={() => {}} /> : null}
+          {activeTask ? <TaskCard task={activeTask} onClick={() => {}} readOnly={!canWrite} /> : null}
         </DragOverlay>
       </DndContext>
 
@@ -138,6 +143,7 @@ export function KanbanBoard({
         members={members}
         labels={labels}
         task={modalState?.mode === "edit" ? modalState.task : undefined}
+        readOnly={!canWrite}
       />
     </>
   );

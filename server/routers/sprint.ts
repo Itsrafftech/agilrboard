@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { router, projectProcedure } from "@/server/trpc";
+import { router, projectProcedure, writerProcedure } from "@/server/trpc";
+import { getSprintOrThrow, scopedWrite } from "@/server/lib/guards";
 
 export const sprintRouter = router({
   list: projectProcedure
@@ -30,7 +31,7 @@ export const sprintRouter = router({
       });
     }),
 
-  create: projectProcedure
+  create: writerProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -55,9 +56,10 @@ export const sprintRouter = router({
       });
     }),
 
-  start: projectProcedure
+  start: writerProcedure
     .input(z.object({ projectId: z.string(), sprintId: z.string() }))
     .mutation(async ({ ctx, input }) => {
+      await getSprintOrThrow(ctx.prisma, input.projectId, input.sprintId);
       const existingActive = await ctx.prisma.sprint.findFirst({
         where: { projectId: input.projectId, status: "ACTIVE" },
       });
@@ -67,22 +69,29 @@ export const sprintRouter = router({
           message: "Another sprint is already active. Complete it first.",
         });
       }
-      return ctx.prisma.sprint.update({
-        where: { id: input.sprintId },
-        data: { status: "ACTIVE" },
-      });
+      return scopedWrite(
+        "Sprint",
+        ctx.prisma.sprint.update({
+          where: { id: input.sprintId, projectId: input.projectId },
+          data: { status: "ACTIVE" },
+        })
+      );
     }),
 
-  complete: projectProcedure
+  complete: writerProcedure
     .input(z.object({ projectId: z.string(), sprintId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      return ctx.prisma.sprint.update({
-        where: { id: input.sprintId },
-        data: { status: "COMPLETED" },
-      });
+      await getSprintOrThrow(ctx.prisma, input.projectId, input.sprintId);
+      return scopedWrite(
+        "Sprint",
+        ctx.prisma.sprint.update({
+          where: { id: input.sprintId, projectId: input.projectId },
+          data: { status: "COMPLETED" },
+        })
+      );
     }),
 
-  update: projectProcedure
+  update: writerProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -95,13 +104,21 @@ export const sprintRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const { projectId, sprintId, ...data } = input;
-      return ctx.prisma.sprint.update({ where: { id: sprintId }, data });
+      await getSprintOrThrow(ctx.prisma, projectId, sprintId);
+      return scopedWrite(
+        "Sprint",
+        ctx.prisma.sprint.update({ where: { id: sprintId, projectId }, data })
+      );
     }),
 
-  delete: projectProcedure
+  delete: writerProcedure
     .input(z.object({ projectId: z.string(), sprintId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      return ctx.prisma.sprint.delete({ where: { id: input.sprintId } });
+      await getSprintOrThrow(ctx.prisma, input.projectId, input.sprintId);
+      return scopedWrite(
+        "Sprint",
+        ctx.prisma.sprint.delete({ where: { id: input.sprintId, projectId: input.projectId } })
+      );
     }),
 
   velocity: projectProcedure

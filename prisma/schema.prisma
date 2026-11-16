@@ -26,6 +26,7 @@ model User {
   createdTasks  Task[]          @relation("TaskCreator")
   comments      TaskComment[]
   ownedProjects Project[]       @relation("ProjectOwner")
+  statusChanges TaskStatusChange[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -89,6 +90,7 @@ model Project {
   sprints        Sprint[]
   tasks          Task[]
   labels         Label[]
+  statusChanges  TaskStatusChange[]
 }
 
 model ProjectMember {
@@ -120,8 +122,9 @@ model Sprint {
   endDate   DateTime
   status    SprintStatus @default(PLANNED)
 
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  tasks   Task[]
+  project       Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tasks         Task[]
+  statusChanges TaskStatusChange[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -163,14 +166,40 @@ model Task {
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   sprint  Sprint? @relation(fields: [sprintId], references: [id], onDelete: SetNull)
 
-  labels   Label[]       @relation("TaskLabels")
-  comments TaskComment[]
+  labels        Label[]            @relation("TaskLabels")
+  comments      TaskComment[]
+  statusChanges TaskStatusChange[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([projectId, status])
   @@index([sprintId])
+}
+
+/// Append-only history of task status changes; burndown and cumulative flow are
+/// computed from it. `sprintId` is the sprint the task was in when the change
+/// happened. A change TO `BACKLOG` with a sprintId means the task LEFT that sprint.
+/// `isBaseline` rows are snapshots written when tracking was introduced for tasks
+/// that already existed: the real time of their last change is unknown.
+model TaskStatusChange {
+  id          String      @id @default(cuid())
+  taskId      String
+  projectId   String
+  sprintId    String?
+  fromStatus  TaskStatus? // null when the task was created
+  toStatus    TaskStatus
+  changedById String
+  changedAt   DateTime    @default(now())
+  isBaseline  Boolean     @default(false)
+
+  task      Task    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sprint    Sprint? @relation(fields: [sprintId], references: [id], onDelete: Cascade)
+  changedBy User    @relation(fields: [changedById], references: [id])
+
+  @@index([projectId, sprintId, changedAt])
+  @@index([taskId, changedAt])
 }
 
 model TaskComment {

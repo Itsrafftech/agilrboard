@@ -4,6 +4,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Plus, CheckCircle2, PlayCircle } from "lucide-react";
 import { trpc } from "@/lib/trpc";
+import { useProjectRole } from "@/lib/use-project-role";
 import { ProjectHeader } from "@/components/project/project-header";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,7 @@ export default function SprintPage({ params }: { params: { projectId: string } }
   const { projectId } = params;
   const [createOpen, setCreateOpen] = useState(false);
 
+  const { canWrite } = useProjectRole(projectId);
   const utils = trpc.useUtils();
   const { data: sprints, isLoading } = trpc.sprint.list.useQuery({ projectId });
   const { data: activeSprint } = trpc.sprint.active.useQuery({ projectId });
@@ -73,10 +75,12 @@ export default function SprintPage({ params }: { params: { projectId: string } }
         title="Sprint planning"
         description="Plan sprints and track progress toward the sprint goal."
         action={
-          <Button onClick={() => setCreateOpen(true)}>
-            <Plus className="h-4 w-4" />
-            New sprint
-          </Button>
+          canWrite && (
+            <Button onClick={() => setCreateOpen(true)}>
+              <Plus className="h-4 w-4" />
+              New sprint
+            </Button>
+          )
         }
       />
 
@@ -104,14 +108,16 @@ export default function SprintPage({ params }: { params: { projectId: string } }
                     {formatDate(activeSprint.startDate)} – {formatDate(activeSprint.endDate)}
                   </p>
                 </div>
-                <Button
-                  variant="secondary"
-                  onClick={() => completeSprint.mutate({ projectId, sprintId: activeSprint.id })}
-                  loading={completeSprint.isLoading}
-                >
-                  <CheckCircle2 className="h-4 w-4" />
-                  Complete sprint
-                </Button>
+                {canWrite && (
+                  <Button
+                    variant="secondary"
+                    onClick={() => completeSprint.mutate({ projectId, sprintId: activeSprint.id })}
+                    loading={completeSprint.isLoading}
+                  >
+                    <CheckCircle2 className="h-4 w-4" />
+                    Complete sprint
+                  </Button>
+                )}
               </div>
 
               <p className="mb-3 text-xs font-medium text-slate-500">
@@ -134,12 +140,14 @@ export default function SprintPage({ params }: { params: { projectId: string } }
                     {task.assignee && (
                       <Avatar name={task.assignee.name} email={task.assignee.email} image={task.assignee.image} size="xs" />
                     )}
-                    <button
-                      onClick={() => removeFromSprint.mutate({ projectId, taskId: task.id })}
-                      className="text-xs font-medium text-slate-400 hover:text-red-500"
-                    >
-                      Remove
-                    </button>
+                    {canWrite && (
+                      <button
+                        onClick={() => removeFromSprint.mutate({ projectId, taskId: task.id })}
+                        className="text-xs font-medium text-slate-400 hover:text-red-500"
+                      >
+                        Remove
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -165,17 +173,19 @@ export default function SprintPage({ params }: { params: { projectId: string } }
                         {formatDate(sprint.startDate)} – {formatDate(sprint.endDate)} · {sprint._count.tasks} tasks
                       </p>
                     </div>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      disabled={hasActive}
-                      loading={startSprint.isLoading}
-                      onClick={() => startSprint.mutate({ projectId, sprintId: sprint.id })}
-                      title={hasActive ? "Complete the active sprint first" : undefined}
-                    >
-                      <PlayCircle className="h-3.5 w-3.5" />
-                      Start
-                    </Button>
+                    {canWrite && (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={hasActive}
+                        loading={startSprint.isLoading}
+                        onClick={() => startSprint.mutate({ projectId, sprintId: sprint.id })}
+                        title={hasActive ? "Complete the active sprint first" : undefined}
+                      >
+                        <PlayCircle className="h-3.5 w-3.5" />
+                        Start
+                      </Button>
+                    )}
                   </div>
                 ))}
               </Card>

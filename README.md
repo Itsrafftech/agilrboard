@@ -44,7 +44,8 @@ cp .env.example .env
 
 | Variable | Description |
 | --- | --- |
-| `DATABASE_URL` | PostgreSQL connection string |
+| `DATABASE_URL` | PostgreSQL connection string (use the pooler URL if you have one) |
+| `DIRECT_URL` | Direct (non-pooled) connection string used by the Prisma CLI. Same as `DATABASE_URL` locally |
 | `NEXTAUTH_URL` | Base URL of the app, e.g. `http://localhost:3000` |
 | `NEXTAUTH_SECRET` | Random secret — generate with `openssl rand -base64 32` |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Optional — from the [Google Cloud Console](https://console.cloud.google.com/apis/credentials) to enable "Continue with Google". Leave blank to use credentials-only login. |
@@ -59,17 +60,29 @@ docker compose up -d
 
 This starts Postgres on `localhost:5432` matching the default `DATABASE_URL` in `.env.example`.
 
-### 5. Push the schema and seed demo data
+### 5. Apply migrations and seed demo data
 
 ```bash
-npm run db:push
+npm run db:deploy   # prisma migrate deploy: applies everything in prisma/migrations
 npm run db:seed
 ```
 
+For day-to-day schema work use `npm run db:migrate` (`prisma migrate dev`) to create and apply new migrations. Do not use `db push` on a database you care about: it leaves no migration history.
+
+**Database that was created earlier with `db push`** (no `_prisma_migrations` table)? Baseline it once, then deploy. The first migration, `20261116000000_init`, is exactly the old schema:
+
+```bash
+npx prisma migrate resolve --applied 20261116000000_init
+npm run db:deploy   # applies 20261116182832_task_status_change
+```
+
+That migration adds the `TaskStatusChange` table and writes one **baseline** snapshot row per existing task (see "Notes on reporting"). Back up the database first if it holds real data.
+
 The seed script creates:
-- 3 demo users (`alice@agileboard.dev`, `bob@agileboard.dev`, `carol@agileboard.dev`), all with password `password123`
+- 3 users (`alice@agileboard.dev` is the project admin, `bob@agileboard.dev`, `carol@agileboard.dev`). Their password is `SEED_PASSWORD` if set, otherwise a random one printed once at the end of the seed output
+- A passwordless shared demo account (`demo@agileboard.dev`) behind the "Try Demo" button. It is sandboxed to the demo project and cannot create projects or manage members
 - One demo project ("AgileBoard Demo") with labels
-- A completed sprint (Sprint 0) and an active sprint (Sprint 1) with tasks in every status
+- A completed sprint (Sprint 0) and an active sprint (Sprint 1) with tasks in every status, plus a **synthetic** status history for them so the demo charts have something to show
 - Several backlog tasks not yet assigned to a sprint
 
 ### 6. Run the dev server
@@ -78,7 +91,7 @@ The seed script creates:
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) and sign in with any seeded user.
+Open [http://localhost:3000](http://localhost:3000) and sign in with a seeded user (password from the seed output) or click **Try Demo**.
 
 ## Useful scripts
 
@@ -86,10 +99,22 @@ Open [http://localhost:3000](http://localhost:3000) and sign in with any seeded 
 | --- | --- |
 | `npm run dev` | Start the Next.js dev server |
 | `npm run build` / `npm start` | Production build and start |
-| `npm run db:push` | Push the Prisma schema to your database (no migration history) |
-| `npm run db:migrate` | Create and apply a Prisma migration |
+| `npm run db:deploy` | Apply committed migrations (`prisma migrate deploy`) |
+| `npm run db:migrate` | Create and apply a new migration during development |
+| `npm run db:push` | Prototype only: sync the schema without migration history |
 | `npm run db:seed` | Seed demo data |
 | `npm run db:studio` | Open Prisma Studio to browse data |
+
+## Tests
+
+Authorization tests (Vitest) call the tRPC routers directly against a real, throwaway PostgreSQL. They cover cross-project access, viewer/admin roles, last-admin protection, foreign assignee/sprint/label ids, the demo sandbox and task ordering.
+
+```bash
+npm run test:db:up   # starts Postgres on localhost:54329 (RAM-backed, docker compose profile "test")
+npm test             # runs the suite once
+```
+
+The suite uses `TEST_DATABASE_URL` (default `postgresql://postgres:postgres@localhost:54329/agileboard_test`) and **never** `DATABASE_URL`. It refuses to start unless the host is local and the database name ends in `_test`. Data is truncated between tests. To start from a blank schema: `docker compose --profile test down && npm run test:db:up`.
 
 ## Project Structure
 
@@ -113,4 +138,10 @@ types/                  Shared TypeScript types and UI constants
 
 ## Notes on reporting
 
-Burndown and cumulative-flow data are derived from each task's **current** status rather than a stored history table (the schema intentionally doesn't include a status-change log). The ideal burndown line and past-day series are computed from today's actual remaining points, which is the standard approach when only current-state data is available. If you need true day-by-day history, add a `TaskStatusChange` table and update `server/routers/report.ts` to read from it instead.
+Burndown and cumulative flow are computed from `TaskStatusChange`, an append-only log written in the same transaction as every status change (create, move between columns, add to / remove from a sprint). Nothing is interpolated:
+
+- **Burndown** = story points of the tasks that were in the sprint at the end of each day and not Done, so scope added or removed mid-sprint is visible. Future days are blank. The ideal line starts from the scope at the end of day one.
+- **Cumulative flow** = number of sprint tasks per status at the end of each day, for days that have real data.
+- **Sprints that predate the log**: the migration stores one *baseline* snapshot per existing task at migration time, because the real timing of earlier changes is unknown. Days before that snapshot are left blank and the report says "history is only available from <date>". A sprint with no usable history says so and shows only today's real value.
+- Limits: story points are read from the task's current value (edits to points are not versioned), and deleting a task removes its history.
+- The seed script writes a clearly synthetic history for the demo sprint.

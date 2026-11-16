@@ -2,6 +2,8 @@ import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { TRPCError } from "@trpc/server";
 import { router, publicProcedure, protectedProcedure } from "@/server/trpc";
+import { isDemoEmail } from "@/lib/demo";
+import { REGISTER_IP_LIMIT, REGISTER_WINDOW_MS, consume } from "@/lib/rate-limit";
 
 export const userRouter = router({
   register: publicProcedure
@@ -13,6 +15,17 @@ export const userRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      if (ctx.ip && !consume(`register:ip:${ctx.ip}`, REGISTER_IP_LIMIT, REGISTER_WINDOW_MS).allowed) {
+        throw new TRPCError({
+          code: "TOO_MANY_REQUESTS",
+          message: "Too many sign-ups from this network. Please try again later.",
+        });
+      }
+
+      if (isDemoEmail(input.email)) {
+        throw new TRPCError({ code: "CONFLICT", message: "An account with this email already exists" });
+      }
+
       const existing = await ctx.prisma.user.findUnique({
         where: { email: input.email },
       });

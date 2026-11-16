@@ -4,10 +4,11 @@ import { getServerSession } from "next-auth";
 import superjson from "superjson";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { clientIp } from "@/lib/rate-limit";
 
-export async function createContext(_opts: FetchCreateContextFnOptions) {
+export async function createContext(opts: FetchCreateContextFnOptions) {
   const session = await getServerSession(authOptions);
-  return { session, prisma };
+  return { session, prisma, ip: clientIp(opts.req.headers) as string | null };
 }
 
 type Context = Awaited<ReturnType<typeof createContext>>;
@@ -33,6 +34,14 @@ const isAuthed = middleware(({ ctx, next }) => {
 });
 
 export const protectedProcedure = t.procedure.use(isAuthed);
+
+/** Actions the shared demo account must never perform (e.g. creating projects). */
+export const nonDemoProcedure = protectedProcedure.use(({ ctx, next }) => {
+  if (ctx.session.user.isDemo) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Not available in demo mode" });
+  }
+  return next();
+});
 
 /**
  * Ensures the caller is a member of `input.projectId` and attaches their
@@ -61,9 +70,37 @@ const isProjectMember = middleware(async ({ ctx, rawInput, next }) => {
     throw new TRPCError({ code: "FORBIDDEN", message: "Not a member of this project" });
   }
 
+  // Demo sessions are sandboxed to projects owned by the demo user, even if the
+  // demo account somehow ended up as a member of a real project.
+  if (ctx.session.user.isDemo) {
+    const project = await ctx.prisma.project.findUnique({
+      where: { id: input.projectId },
+      select: { ownerId: true },
+    });
+    if (!project || project.ownerId !== ctx.session.user.id) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "Not available in demo mode" });
+    }
+  }
+
   return next({
     ctx: { ...ctx, session: { ...ctx.session, user: ctx.session.user }, membership },
   });
 });
 
 export const projectProcedure = t.procedure.use(isProjectMember);
+
+/** Any mutation that changes project content: Viewers are read-only. */
+export const writerProcedure = projectProcedure.use(({ ctx, next }) => {
+  if (ctx.membership.role === "VIEWER") {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Viewers have read-only access to this project" });
+  }
+  return next();
+});
+
+/** Member management and other project-level administration. */
+export const adminProcedure = projectProcedure.use(({ ctx, next }) => {
+  if (ctx.membership.role !== "ADMIN" || ctx.session.user.isDemo) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Only project admins can perform this action" });
+  }
+  return next();
+});
